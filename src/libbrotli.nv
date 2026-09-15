@@ -1,0 +1,144 @@
+// The C entry points of libbrotlidec, one novo-lang declaration each.
+//
+// A pointer is an `Int`: the C API hands out one opaque handle, the
+// decoder instance, and this module carries it as the address the C
+// library returned.  Zero is the null pointer.
+//
+// A buffer is an address and a length, never a novo-lang value.  The
+// caller reserves the bytes with `ptr.alloc`, writes them with
+// `ptr.write_bytes_buf` and reads them back with `ptr.read_bytes_n`.
+//
+// An out-parameter is the address of a slot the caller owns.  The
+// streaming entry point takes five of them, and it UPDATES each one:
+// the two lengths count down, the two addresses walk forward, and the
+// total counts up.  `ptr.alloc_word` reserves one such slot and
+// `ptr.read_word` reads it back.
+//
+// The decoder's error codes are NEGATIVE, and they arrive from the
+// foreign function interface as 32-bit values.  Convert with `as i32`
+// before comparing one with a negative number.
+//
+// This is the decoder.  The Brotli encoder is a separate shared
+// library, `libbrotlienc`, and a `sys` package wraps one library.  The
+// README's "What is not included" section says so.
+
+// Create a decoder instance.
+//
+// `alloc_func`, `free_func` and `opaque` are a custom allocator, and 0
+// for all three selects the library's own.  Answers 0 when the
+// allocation failed.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderCreateInstance")
+fn brotli_decoder_create_instance(alloc_func: Int, free_func: Int, opaque: Int) -> Int [ffi]
+
+// Release a decoder instance.
+//
+// Releasing the null address is allowed and does nothing.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderDestroyInstance")
+fn brotli_decoder_destroy_instance(state: Int) [ffi]
+
+// Decompress a whole Brotli stream in one call.
+//
+// `encoded_size` and `encoded` are the input.  `decoded_size` is the
+// address of a slot holding the size of the output buffer on the way
+// in and the number of bytes written on the way out.  `decoded` is the
+// output buffer.  Answers 1, `BROTLI_DECODER_RESULT_SUCCESS`, when the
+// whole stream was decompressed, and 0 on an error.  A stream that
+// needs more room answers 0 as well, because there is nowhere for this
+// call to continue from.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderDecompress")
+fn brotli_decoder_decompress(encoded_size: Int, encoded: Int, decoded_size: Int,
+                             decoded: Int) -> Int [ffi]
+
+// Decompress part of a stream, and say what is needed next.
+//
+// The five addresses are slots the caller owns and the decoder
+// updates: `available_in` is the input left, `next_in` the address of
+// the address of the next input byte, `available_out` the room left,
+// `next_out` the address of the address of the next output byte, and
+// `total_out` the running count of bytes produced.  Pass 0 for
+// `total_out` to discard it.
+//
+// Answers 0 on an error, 1 when the stream is complete, 2 when more
+// input is needed and 3 when more output room is needed.  A 2 with
+// input still available is not possible, and a 3 means the caller
+// drains and calls again with the same input.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderDecompressStream")
+fn brotli_decoder_decompress_stream(state: Int, available_in: Int, next_in: Int, available_out: Int,
+                                    next_out: Int, total_out: Int) -> Int [ffi]
+
+// Ask whether the decoder is holding output it has not handed over.
+//
+// Answers 1 when it is.  This is only about output produced into the
+// decoder's own buffer, which is what `BrotliDecoderTakeOutput`
+// collects; output written into the caller's buffer is already
+// delivered.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderHasMoreOutput")
+fn brotli_decoder_has_more_output(state: Int) -> Int [ffi]
+
+// Take a run of output from the decoder's own buffer.
+//
+// `size` is the address of a slot holding the most the caller will
+// take on the way in, or 0 to take whatever is there, and the number
+// of bytes available on the way out.  The answer is the address of
+// those bytes, inside the decoder, valid until the next call on it.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderTakeOutput")
+fn brotli_decoder_take_output(state: Int, size: Int) -> Int [ffi]
+
+// Ask whether the decoder has been given any input yet.
+//
+// Answers 1 once the first call to `BrotliDecoderDecompressStream` has
+// been made.  Several settings may only be changed before that.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderIsUsed")
+fn brotli_decoder_is_used(state: Int) -> Int [ffi]
+
+// Ask whether the decoder has reached the end of the stream.
+//
+// Answers 1 when the stream ended and every byte of output has been
+// handed over.  A decoder that is finished accepts no more input.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderIsFinished")
+fn brotli_decoder_is_finished(state: Int) -> Int [ffi]
+
+// Get the code for the decoder's last error.
+//
+// Answers 0, `BROTLI_DECODER_NO_ERROR`, when nothing has gone wrong.
+// Every real error code is NEGATIVE: the format errors run from -1
+// down, and the allocation errors from -30 down.  The value arrives in
+// 32 bits, so convert it with `as i32` before comparing it.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderGetErrorCode")
+fn brotli_decoder_get_error_code(state: Int) -> Int [ffi]
+
+// Get the text for an error code.
+//
+// The answer is the address of a static string the library owns, such
+// as `"EXUBERANT_NIBBLE"`.  Pass the code as the C enumeration value,
+// not as the 32-bit pattern it arrived in.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderErrorString")
+fn brotli_decoder_error_string(code: Int) -> Int [ffi]
+
+// Set one parameter on a decoder instance.
+//
+// `param` 0 is `BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION`
+// and 1 is `BROTLI_DECODER_PARAM_LARGE_WINDOW`, which allows a window
+// larger than the 16 MB the format's own limit allows.  Answers 1 on
+// success, and 0 when the parameter is unknown or the decoder has
+// already been given input.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderSetParameter")
+fn brotli_decoder_set_parameter(state: Int, param: Int, value: Int) -> Int [ffi]
+
+// Attach a shared dictionary to a decoder instance.
+//
+// `dict_type` is 0 for a raw dictionary, the bytes themselves, and 1
+// for a serialised one.  `data_size` and `data` are the dictionary.
+// Answers 1 on success.  It must be attached before the first input,
+// and it must be the dictionary the encoder used.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderAttachDictionary")
+fn brotli_decoder_attach_dictionary(state: Int, dict_type: Int, data_size: Int,
+                                    data: Int) -> Int [ffi]
+
+// Get the version of the library as a number.
+//
+// The value packs the major version into bits 24 and above, the minor
+// into bits 12 to 23 and the patch into bits 0 to 11: 1.1.0 answers
+// 0x1001000.
+pub @ffi(library = "brotlidec", symbol = "BrotliDecoderVersion")
+fn brotli_decoder_version() -> Int [ffi]

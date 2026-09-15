@@ -1,0 +1,206 @@
+// API tests for the libbrotlidec bindings.
+//
+// Every test below calls into the C library, so the suite needs
+// libbrotlidec installed and linked.  `novo pkg build` type-checks the
+// declarations without it; `novo test` runs them and does not.
+//
+// The suite decompresses in memory and reads and writes nothing.  The
+// frame it decompresses is a fixed vector, because this package binds
+// the decoder and cannot produce one.
+
+use std.test
+use libbrotli
+
+// A Brotli frame produced from MESSAGE at quality 11 with the default
+// window.  The encoder is `libbrotlienc`, which this package does not
+// bind, so the frame is carried here as a constant.
+const FRAME_HEX: Str = "1b3b00509d0976ac0beb58cec39acc8c8d4e83b0cce5cd333cbd7c430b830d38700830c807d26103ce638b175c64dd7f85a86f4ab451a73ec82604"
+const FRAME_LEN: Int = 59
+
+// What the frame decompresses to, and its length in bytes.
+const MESSAGE: Str = "the quick brown fox jumps over the lazy dog, again and again"
+const MESSAGE_LEN: Int = 60
+
+// `BROTLI_DECODER_RESULT_SUCCESS`.
+const RESULT_SUCCESS: Int = 1
+
+// `BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT`.
+const RESULT_NEEDS_MORE_OUTPUT: Int = 3
+
+// Write the frame into freshly reserved memory and answer its address.
+fn frame_buffer() -> Int
+    let buf = ptr.alloc(FRAME_LEN)
+    let _ = ptr.write_bytes_buf(buf, bytes.from_hex(FRAME_HEX) ?? bytes.from_str(""))
+    buf
+
+@test
+fn test_the_library_reports_its_own_version() [io, ffi]
+    test.case("BrotliDecoderVersion")
+    // 1.0.0 packs as 0x1000000, and every later release is above it.
+    test.assert(libbrotli.brotli_decoder_version() >= 0x1000000)
+
+@test
+fn test_the_one_shot_call_decompresses_the_frame() [io, ffi]
+    test.case("BrotliDecoderDecompress")
+    let frame = frame_buffer()
+    let out = ptr.alloc(128)
+    let size = ptr.alloc_word()
+    ptr.write_word(size, 128)
+    let rc = libbrotli.brotli_decoder_decompress(FRAME_LEN, frame, size, out)
+    test.assert(rc == RESULT_SUCCESS)
+    test.assert(ptr.read_word(size) == MESSAGE_LEN)
+    test.assert(bytes.to_str(ptr.read_bytes_n(out, MESSAGE_LEN)) == MESSAGE)
+    ptr.free(size)
+    ptr.free(out)
+    ptr.free(frame)
+
+@test
+fn test_a_buffer_that_is_too_small_is_refused() [io, ffi]
+    test.case("BrotliDecoderDecompress with no room")
+    let frame = frame_buffer()
+    let out = ptr.alloc(8)
+    let size = ptr.alloc_word()
+    ptr.write_word(size, 8)
+    // The one-shot call has nowhere to continue from, so running out
+    // of room is an error rather than a request for more.
+    test.assert(libbrotli.brotli_decoder_decompress(FRAME_LEN, frame, size, out) == 0)
+    ptr.free(size)
+    ptr.free(out)
+    ptr.free(frame)
+
+@test
+fn test_an_instance_is_created_and_released() [io, ffi]
+    test.case("BrotliDecoderCreateInstance, BrotliDecoderIsUsed, DestroyInstance")
+    let state = libbrotli.brotli_decoder_create_instance(0, 0, 0)
+    test.assert(state != 0)
+    // Nothing has been fed in, so the decoder is unused and unfinished.
+    test.assert(libbrotli.brotli_decoder_is_used(state) == 0)
+    test.assert(libbrotli.brotli_decoder_is_finished(state) == 0)
+    test.assert(libbrotli.brotli_decoder_has_more_output(state) == 0)
+    libbrotli.brotli_decoder_destroy_instance(state)
+
+@test
+fn test_a_parameter_is_set_before_the_first_input() [io, ffi]
+    test.case("BrotliDecoderSetParameter")
+    let state = libbrotli.brotli_decoder_create_instance(0, 0, 0)
+    // 1 is BROTLI_DECODER_PARAM_LARGE_WINDOW.
+    test.assert(libbrotli.brotli_decoder_set_parameter(state, 1, 1) == 1)
+    // 0 is BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION.
+    test.assert(libbrotli.brotli_decoder_set_parameter(state, 0, 1) == 1)
+    test.assert(libbrotli.brotli_decoder_set_parameter(state, 9999, 1) == 0)
+    libbrotli.brotli_decoder_destroy_instance(state)
+
+@test
+fn test_the_streaming_call_decompresses_the_frame() [io, ffi]
+    test.case("BrotliDecoderDecompressStream with the five updated slots")
+    let frame = frame_buffer()
+    let out = ptr.alloc(128)
+    let state = libbrotli.brotli_decoder_create_instance(0, 0, 0)
+    let available_in = ptr.alloc_word()
+    let next_in = ptr.alloc_word()
+    let available_out = ptr.alloc_word()
+    let next_out = ptr.alloc_word()
+    let total_out = ptr.alloc_word()
+    ptr.write_word(available_in, FRAME_LEN)
+    ptr.write_word(next_in, frame)
+    ptr.write_word(available_out, 128)
+    ptr.write_word(next_out, out)
+    let rc = libbrotli.brotli_decoder_decompress_stream(state, available_in, next_in,
+                                                        available_out, next_out,
+                                                        total_out)
+    test.assert(rc == RESULT_SUCCESS)
+    test.assert(ptr.read_word(total_out) == MESSAGE_LEN)
+    // The decoder counted the input down and walked the output on.
+    test.assert(ptr.read_word(available_in) == 0)
+    test.assert(ptr.read_word(available_out) == 128 - MESSAGE_LEN)
+    test.assert(ptr.read_word(next_out) == out + MESSAGE_LEN)
+    test.assert(libbrotli.brotli_decoder_is_used(state) == 1)
+    test.assert(libbrotli.brotli_decoder_is_finished(state) == 1)
+    test.assert(bytes.to_str(ptr.read_bytes_n(out, MESSAGE_LEN)) == MESSAGE)
+    libbrotli.brotli_decoder_destroy_instance(state)
+    ptr.free(total_out)
+    ptr.free(next_out)
+    ptr.free(available_out)
+    ptr.free(next_in)
+    ptr.free(available_in)
+    ptr.free(out)
+    ptr.free(frame)
+
+@test
+fn test_the_decoder_asks_for_more_room_and_hands_its_output_over() [io, ffi]
+    test.case("BrotliDecoderHasMoreOutput and BrotliDecoderTakeOutput")
+    let frame = frame_buffer()
+    let state = libbrotli.brotli_decoder_create_instance(0, 0, 0)
+    let available_in = ptr.alloc_word()
+    let next_in = ptr.alloc_word()
+    let available_out = ptr.alloc_word()
+    let next_out = ptr.alloc_word()
+    ptr.write_word(available_in, FRAME_LEN)
+    ptr.write_word(next_in, frame)
+    // No output room at all, so the decoder fills its own buffer and
+    // asks for somewhere to put it.
+    ptr.write_word(available_out, 0)
+    ptr.write_word(next_out, 0)
+    let rc = libbrotli.brotli_decoder_decompress_stream(state, available_in, next_in,
+                                                        available_out, next_out, 0)
+    test.assert(rc == RESULT_NEEDS_MORE_OUTPUT)
+    test.assert(libbrotli.brotli_decoder_has_more_output(state) == 1)
+    let size = ptr.alloc_word()
+    ptr.write_word(size, 0)
+    let held = libbrotli.brotli_decoder_take_output(state, size)
+    test.assert(held != 0)
+    test.assert(ptr.read_word(size) == MESSAGE_LEN)
+    test.assert(bytes.to_str(ptr.read_bytes_n(held, MESSAGE_LEN)) == MESSAGE)
+    libbrotli.brotli_decoder_destroy_instance(state)
+    ptr.free(size)
+    ptr.free(next_out)
+    ptr.free(available_out)
+    ptr.free(next_in)
+    ptr.free(available_in)
+    ptr.free(frame)
+
+@test
+fn test_a_corrupt_frame_answers_a_negative_error_code() [io, ffi]
+    test.case("BrotliDecoderGetErrorCode and BrotliDecoderErrorString")
+    // A fresh decoder has no error, and the code for that is zero.
+    let clean = libbrotli.brotli_decoder_create_instance(0, 0, 0)
+    test.assert(libbrotli.brotli_decoder_get_error_code(clean) == 0)
+    libbrotli.brotli_decoder_destroy_instance(clean)
+
+    let junk = ptr.alloc(16)
+    let _ = ptr.write_bytes_buf(junk, bytes.from_str("not a brotli str"))
+    let out = ptr.alloc(64)
+    let state = libbrotli.brotli_decoder_create_instance(0, 0, 0)
+    let available_in = ptr.alloc_word()
+    let next_in = ptr.alloc_word()
+    let available_out = ptr.alloc_word()
+    let next_out = ptr.alloc_word()
+    ptr.write_word(available_in, 16)
+    ptr.write_word(next_in, junk)
+    ptr.write_word(available_out, 64)
+    ptr.write_word(next_out, out)
+    let rc = libbrotli.brotli_decoder_decompress_stream(state, available_in, next_in,
+                                                        available_out, next_out, 0)
+    test.assert(rc == 0)
+    // Every real error code is negative, and it arrives in 32 bits.
+    let code = libbrotli.brotli_decoder_get_error_code(state) as i32
+    test.assert(code < 0)
+    test.assert(str.len(ptr.read_str(libbrotli.brotli_decoder_error_string(code))) > 0)
+    libbrotli.brotli_decoder_destroy_instance(state)
+    ptr.free(next_out)
+    ptr.free(available_out)
+    ptr.free(next_in)
+    ptr.free(available_in)
+    ptr.free(out)
+    ptr.free(junk)
+
+@test
+fn test_a_dictionary_attaches_before_the_first_input() [io, ffi]
+    test.case("BrotliDecoderAttachDictionary")
+    let dict = ptr.alloc(64)
+    let _ = ptr.write_bytes_buf(dict, bytes.from_str("the quick brown fox"))
+    let state = libbrotli.brotli_decoder_create_instance(0, 0, 0)
+    // 0 is BROTLI_SHARED_DICTIONARY_RAW: the bytes themselves.
+    test.assert(libbrotli.brotli_decoder_attach_dictionary(state, 0, 19, dict) == 1)
+    libbrotli.brotli_decoder_destroy_instance(state)
+    ptr.free(dict)
