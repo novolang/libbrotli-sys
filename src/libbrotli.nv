@@ -9,12 +9,12 @@
 // `ptr.write_bytes_buf` and reads them back with `ptr.read_bytes_n`.
 //
 // An out-parameter is the address of a slot the caller owns.  The
-// streaming entry point takes five of them, and it UPDATES each one:
-// the two lengths count down, the two addresses walk forward, and the
+// streaming entry point takes five of them, and it updates each one.
+// The two lengths count down, the two addresses walk forward, and the
 // total counts up.  `ptr.alloc_word` reserves one such slot and
 // `ptr.read_word` reads it back.
 //
-// The decoder's error codes are NEGATIVE, and they arrive from the
+// The decoder's error codes are negative, and they arrive from the
 // foreign function interface as 32-bit values.  Convert with `as i32`
 // before comparing one with a negative number.
 //
@@ -101,7 +101,7 @@ fn brotli_decoder_is_finished(state: Int) -> Int [ffi]
 // Get the code for the decoder's last error.
 //
 // Answers 0, `BROTLI_DECODER_NO_ERROR`, when nothing has gone wrong.
-// Every real error code is NEGATIVE: the format errors run from -1
+// Every real error code is negative.  The format errors run from -1
 // down, and the allocation errors from -30 down.  The value arrives in
 // 32 bits, so convert it with `as i32` before comparing it.
 pub @ffi(library = "brotlidec", symbol = "BrotliDecoderGetErrorCode")

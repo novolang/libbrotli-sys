@@ -5,6 +5,10 @@ is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.1.1 — 2026-09-18
+
+The documentation and comments in plain prose; no declaration changed.
+
 ## 0.1.0 — 2026-09-15
 
 The first release: thirteen entry points of the libbrotlidec C API, one
@@ -27,14 +31,6 @@ The first release: thirteen entry points of the libbrotlidec C API, one
   call the C library, so they need libbrotlidec installed. The frame
   they decompress is a fixed vector, carried in the suite as hex,
   because this package binds the decoder and cannot produce one.
-
-### Not a `0.0.x` interface release
-
-An interface release is the shape whose every `pub fn` body is a
-`todo()`. Every `pub fn` here is an `@ffi` declaration with no body, so
-`novo pkg publish` reads the package as a release with bodies and
-refuses a `0.0.x` version for it. The first release of a bindings
-package is therefore `0.1.0`.
 
 ### Named as missing
 

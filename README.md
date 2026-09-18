@@ -9,13 +9,12 @@ reference implementation is the C library the Brotli project publishes.
 This package declares the thirteen entry points of that library's
 **decoder** to novo-lang, one declaration each.
 
-**Status: a binding, not a port.** Every function in this package is a
-declaration of a function in libbrotlidec. The package contains no
-logic of its own, and it does nothing without the C library installed.
-The thirteen entry points are the whole decoder interface apart from
-the metadata callbacks; the section "What is not included" says what a
-program still cannot do with them alone, and the first item is
-compression.
+Every function here is a declaration of a function in libbrotlidec.
+The package contains no logic of its own, and it does nothing without
+the C library installed. The thirteen calls are the decoder's whole
+published C API apart from the metadata callbacks. The section "What is
+not included" says what a program cannot do with them alone, and the
+first item is compression.
 
 ## What it is
 
@@ -223,8 +222,8 @@ halves in one library.
 
 ## Tests
 
-`tests/libbrotli_tests.nv` holds nine tests written against the
-signatures. They call the C library, so `novo test` needs libbrotlidec
+`tests/libbrotli_tests.nv` holds nine tests over the thirteen entry
+points. They call the C library, so `novo test` needs libbrotlidec
 installed and linkable:
 
 ```
@@ -248,18 +247,6 @@ the same message and leaves the five slots where the reference says it
 should; that a decoder given no output room asks for more and hands its
 buffer over; that sixteen bytes of text are refused with a negative
 error code that has a name; and that a raw dictionary attaches.
-
-## Implementation status
-
-| Group | State |
-| --- | --- |
-| Instance | Complete apart from the metadata callbacks. |
-| Decompression | Complete. |
-| Held output | Complete. |
-| Errors and version | Complete. |
-| Encoder | Absent. It is a separate shared library. |
-| Metadata callbacks | Absent. They take C function pointers. |
-| Dictionary construction | Absent. It is in `libbrotlicommon`. |
 
 ## Licence
 
